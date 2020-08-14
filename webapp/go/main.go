@@ -18,6 +18,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	"github.com/joho/godotenv"
 	goji "goji.io"
 	"goji.io/pat"
 	"golang.org/x/crypto/bcrypt"
@@ -279,30 +280,19 @@ func init() {
 }
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	host := os.Getenv("MYSQL_HOST")
-	if host == "" {
-		host = "127.0.0.1"
-	}
 	port := os.Getenv("MYSQL_PORT")
-	if port == "" {
-		port = "3306"
-	}
 	_, err := strconv.Atoi(port)
 	if err != nil {
 		log.Fatalf("failed to read DB port number from an environment variable MYSQL_PORT.\nError: %s", err.Error())
 	}
 	user := os.Getenv("MYSQL_USER")
-	if user == "" {
-		user = "isucari"
-	}
 	dbname := os.Getenv("MYSQL_DBNAME")
-	if dbname == "" {
-		dbname = "isucari"
-	}
 	password := os.Getenv("MYSQL_PASS")
-	if password == "" {
-		password = "isucari"
-	}
 
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
