@@ -432,6 +432,30 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	return userSimple, err
 }
 
+func getUserSimpleMapByIDs(q sqlx.Queryer, userIDs []int64) (map[int64]UserSimple, error) {
+	sql, params, err := sqlx.In("SELECT * FROM `users` WHERE `id` in (?)", userIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	users := []User{}
+	err = sqlx.Select(q, &users, sql, params...)
+	if err != nil {
+		return nil, err
+	}
+
+	userSimpleMap := make(map[int64]UserSimple)
+	for _, user := range users {
+		userSimpleMap[user.ID] = UserSimple{
+			ID:           user.ID,
+			AccountName:  user.AccountName,
+			NumSellItems: user.NumSellItems,
+		}
+	}
+
+	return userSimpleMap, err
+}
+
 func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
 	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
 	if category.ParentID != 0 {
@@ -938,9 +962,20 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemDetails := []ItemDetail{}
+
+	// userSimpleをあらかじめ取得しておきN+1問題を改善する
+	var sellerIDs []int64
+	var buyerIDs []int64
 	for _, item := range items {
-		seller, err := getUserSimpleByID(tx, item.SellerID)
-		if err != nil {
+		sellerIDs = append(sellerIDs, item.SellerID)
+		buyerIDs = append(buyerIDs, item.BuyerID)
+	}
+	userIDs := Merge(sellerIDs, buyerIDs)
+	userSimpleMap, err := getUserSimpleMapByIDs(tx, userIDs)
+
+	for _, item := range items {
+		seller, ok := userSimpleMap[item.SellerID]
+		if !ok {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			tx.Rollback()
 			return
@@ -972,8 +1007,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if item.BuyerID != 0 {
-			buyer, err := getUserSimpleByID(tx, item.BuyerID)
-			if err != nil {
+			buyer, ok := userSimpleMap[item.BuyerID]
+			if !ok {
 				outputErrorMsg(w, http.StatusNotFound, "buyer not found")
 				tx.Rollback()
 				return
