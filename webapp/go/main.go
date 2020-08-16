@@ -810,7 +810,27 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 
 	items := []Item{}
 	err = dbx.Select(&items, inQuery, inArgs...)
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		return
+	}
 
+	var sellerIds []int64
+	var categoryIds []int
+	for _, item := range items {
+		sellerIds = append(sellerIds, item.SellerID)
+		categoryIds = append(categoryIds, item.CategoryID)
+	}
+
+	userSimpleMap, err := getUserSimpleMap(dbx, sellerIds)
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		return
+	}
+
+	categoryMap, err := getCategoryMap(dbx, categoryIds)
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
@@ -819,13 +839,13 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
-		seller, err := getUserSimpleByID(dbx, item.SellerID)
-		if err != nil {
+		seller, ok := userSimpleMap[item.SellerID]
+		if !ok {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			return
 		}
-		category, err := getCategoryByID(dbx, item.CategoryID)
-		if err != nil {
+		category, ok := categoryMap[item.CategoryID]
+		if !ok {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
 			return
 		}
