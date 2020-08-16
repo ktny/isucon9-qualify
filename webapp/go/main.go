@@ -467,7 +467,6 @@ SELECT
 	t.id AS id,
 	t.status AS status,
 	s.status AS shipping_status,
-	s.reserve_id AS shipping_reserve_id
 FROM
 	transaction_evidences t
 LEFT JOIN
@@ -1087,19 +1086,9 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
-				ReserveID: transactionEvidence.ShippingReserveId,
-			})
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-				tx.Rollback()
-				return
-			}
-
 			itemDetail.TransactionEvidenceID = transactionEvidence.ID
 			itemDetail.TransactionEvidenceStatus = transactionEvidence.Status
-			itemDetail.ShippingStatus = ssr.Status
+			itemDetail.ShippingStatus = transactionEvidence.ShippingStatus
 		}
 
 		itemDetails = append(itemDetails, itemDetail)
