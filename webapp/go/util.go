@@ -1,6 +1,6 @@
 package main
 
-func Merge(a, b []int64) []int64 {
+func merge(a, b []int64) []int64 {
 	merged := a[:]
 	merged = append(merged, b...)
 

@@ -62,10 +62,12 @@ const (
 )
 
 var (
-	templates *template.Template
-	dbx       *sqlx.DB
-	store     sessions.Store
-	app       *newrelic.Application
+	templates     *template.Template
+	dbx           *sqlx.DB
+	store         sessions.Store
+	app           *newrelic.Application
+	userSimpleMap map[int64]UserSimple
+	categoryMap   map[int]Category
 )
 
 type Config struct {
@@ -328,6 +330,12 @@ func main() {
 	}
 	defer dbx.Close()
 
+	// ユーザーとカテゴリマップをあらかじめメモリに展開しておく。TODO: Redis化
+	tx := dbx.MustBegin()
+	userSimpleMap, err = getUserSimpleMap(tx)
+	categoryMap, err = getCategoryMap(tx)
+	tx.Commit()
+
 	mux := goji.NewMux()
 	mux.Use(nrt)
 
@@ -432,14 +440,9 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	return userSimple, err
 }
 
-func getUserSimpleMapByIDs(q sqlx.Queryer, userIDs []int64) (map[int64]UserSimple, error) {
-	sql, params, err := sqlx.In("SELECT * FROM `users` WHERE `id` in (?)", userIDs)
-	if err != nil {
-		return nil, err
-	}
-
+func getUserSimpleMap(q sqlx.Queryer) (map[int64]UserSimple, error) {
 	users := []User{}
-	err = sqlx.Select(q, &users, sql, params...)
+	err := sqlx.Select(q, &users, "SELECT * FROM `users`")
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +469,25 @@ func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err err
 		category.ParentCategoryName = parentCategory.CategoryName
 	}
 	return category, err
+}
+
+func getCategoryMap(q sqlx.Queryer) (map[int]Category, error) {
+	categories := []Category{}
+	err := sqlx.Select(q, &categories, "SELECT * FROM `categories`")
+	if err != nil {
+		return nil, err
+	}
+
+	categoryMap := make(map[int]Category)
+	for _, category := range categories {
+		parentCategory, ok := categoryMap[category.ParentID]
+		if ok {
+			category.ParentCategoryName = parentCategory.CategoryName
+		}
+		categoryMap[category.ID] = category
+	}
+
+	return categoryMap, err
 }
 
 func getConfigByName(name string) (string, error) {
@@ -963,16 +985,6 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 
 	itemDetails := []ItemDetail{}
 
-	// userSimpleをあらかじめ取得しておきN+1問題を改善する
-	var sellerIDs []int64
-	var buyerIDs []int64
-	for _, item := range items {
-		sellerIDs = append(sellerIDs, item.SellerID)
-		buyerIDs = append(buyerIDs, item.BuyerID)
-	}
-	userIDs := Merge(sellerIDs, buyerIDs)
-	userSimpleMap, err := getUserSimpleMapByIDs(tx, userIDs)
-
 	for _, item := range items {
 		seller, ok := userSimpleMap[item.SellerID]
 		if !ok {
@@ -980,8 +992,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			tx.Rollback()
 			return
 		}
-		category, err := getCategoryByID(tx, item.CategoryID)
-		if err != nil {
+		category, ok := categoryMap[item.CategoryID]
+		if !ok {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
 			tx.Rollback()
 			return
