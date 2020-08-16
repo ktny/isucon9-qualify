@@ -466,7 +466,7 @@ SELECT
 	t.item_id AS item_id,
 	t.id AS id,
 	t.status AS status,
-	s.status AS shipping_status,
+	s.status AS shipping_status
 FROM
 	transaction_evidences t
 LEFT JOIN
