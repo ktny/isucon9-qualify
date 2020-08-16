@@ -62,12 +62,10 @@ const (
 )
 
 var (
-	templates     *template.Template
-	dbx           *sqlx.DB
-	store         sessions.Store
-	app           *newrelic.Application
-	userSimpleMap map[int64]UserSimple
-	categoryMap   map[int]Category
+	templates *template.Template
+	dbx       *sqlx.DB
+	store     sessions.Store
+	app       *newrelic.Application
 )
 
 type Config struct {
@@ -330,12 +328,6 @@ func main() {
 	}
 	defer dbx.Close()
 
-	// ユーザーとカテゴリマップをあらかじめメモリに展開しておく。TODO: Redis化
-	tx := dbx.MustBegin()
-	userSimpleMap, err = getUserSimpleMap(tx)
-	categoryMap, err = getCategoryMap(tx)
-	tx.Commit()
-
 	mux := goji.NewMux()
 	mux.Use(nrt)
 
@@ -440,9 +432,14 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	return userSimple, err
 }
 
-func getUserSimpleMap(q sqlx.Queryer) (map[int64]UserSimple, error) {
+func getUserSimpleMap(q sqlx.Queryer, userIds []int64) (map[int64]UserSimple, error) {
+	query, args, err := sqlx.In("SELECT id, account_name, num_sell_items FROM `users` WHERE `id` IN (?)", userIds)
+	if err != nil {
+		return nil, err
+	}
+
 	users := []User{}
-	err := sqlx.Select(q, &users, "SELECT id, account_name, num_sell_items FROM `users`")
+	err = sqlx.Select(q, &users, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -471,23 +468,44 @@ func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err err
 	return category, err
 }
 
-func getCategoryMap(q sqlx.Queryer) (map[int]Category, error) {
+func getCategoryMap(q sqlx.Queryer, categoryIds []int) (map[int]Category, error) {
+	query, args, err := sqlx.In("SELECT * FROM `categories` WHERE `id` IN (?)", categoryIds)
+	if err != nil {
+		return nil, err
+	}
+
 	categories := []Category{}
-	err := sqlx.Select(q, &categories, "SELECT * FROM `categories`")
+	err = sqlx.Select(q, &categories, query, args...)
 	if err != nil {
 		return nil, err
 	}
 
 	categoryMap := make(map[int]Category)
 	for _, category := range categories {
-		parentCategory, ok := categoryMap[category.ParentID]
-		if ok {
-			category.ParentCategoryName = parentCategory.CategoryName
+		parentCategory, err := getCategoryByID(q, category.ParentID)
+		if err != nil {
+			return nil, err
 		}
+		category.ParentCategoryName = parentCategory.CategoryName
 		categoryMap[category.ID] = category
 	}
 
 	return categoryMap, err
+}
+
+func getTransactionEvidenceMap(q sqlx.Queryer) (map[int64]TransactionEvidence, error) {
+	transactionEvidences := []TransactionEvidence{}
+	err := sqlx.Select(q, &transactionEvidences, "SELECT id, status FROM `transaction_evidences`")
+	if err != nil {
+		return nil, err
+	}
+
+	transactionEvidenceMap := make(map[int64]TransactionEvidence)
+	for _, transactionEvidence := range transactionEvidences {
+		transactionEvidenceMap[transactionEvidence.ID] = transactionEvidence
+	}
+
+	return transactionEvidenceMap, err
 }
 
 func getConfigByName(name string) (string, error) {
@@ -984,6 +1002,19 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemDetails := []ItemDetail{}
+
+	var sellerIds []int64
+	var buyerIds []int64
+	var categoryIds []int
+	for _, item := range items {
+		sellerIds = append(sellerIds, item.SellerID)
+		buyerIds = append(buyerIds, item.BuyerID)
+		categoryIds = append(categoryIds, item.CategoryID)
+	}
+	userIds := merge(sellerIds, buyerIds)
+
+	userSimpleMap, err := getUserSimpleMap(tx, userIds)
+	categoryMap, err := getCategoryMap(tx, categoryIds)
 
 	for _, item := range items {
 		seller, ok := userSimpleMap[item.SellerID]
