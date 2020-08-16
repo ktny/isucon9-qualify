@@ -330,6 +330,8 @@ func main() {
 	}
 	defer dbx.Close()
 
+	loadCategories()
+
 	mux := goji.NewMux()
 	mux.Use(nrt)
 
@@ -456,43 +458,6 @@ func getUserSimpleMap(q sqlx.Queryer, userIds []int64) (map[int64]UserSimple, er
 	}
 
 	return userSimpleMap, err
-}
-
-func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
-	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
-	if category.ParentID != 0 {
-		parentCategory, err := getCategoryByID(q, category.ParentID)
-		if err != nil {
-			return category, err
-		}
-		category.ParentCategoryName = parentCategory.CategoryName
-	}
-	return category, err
-}
-
-func getCategoryMap(q sqlx.Queryer, categoryIds []int) (map[int]Category, error) {
-	query, args, err := sqlx.In("SELECT * FROM `categories` WHERE `id` IN (?)", categoryIds)
-	if err != nil {
-		return nil, err
-	}
-
-	categories := []Category{}
-	err = sqlx.Select(q, &categories, query, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	categoryMap := make(map[int]Category)
-	for _, category := range categories {
-		parentCategory, err := getCategoryByID(q, category.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		category.ParentCategoryName = parentCategory.CategoryName
-		categoryMap[category.ID] = category
-	}
-
-	return categoryMap, err
 }
 
 func getTransactionEvidenceMap(q sqlx.Queryer, itemIds []int64) (map[int64]TransactionEvidence, error) {
@@ -683,13 +648,6 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	categoryMap, err := getCategoryMap(dbx, categoryIds)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
-
 	for _, item := range items {
 		seller, ok := userSimpleMap[item.SellerID]
 		if !ok {
@@ -824,13 +782,6 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userSimpleMap, err := getUserSimpleMap(dbx, sellerIds)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
-
-	categoryMap, err := getCategoryMap(dbx, categoryIds)
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
@@ -1069,14 +1020,6 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 	userIds := merge(sellerIds, buyerIds)
 
 	userSimpleMap, err := getUserSimpleMap(tx, userIds)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		tx.Rollback()
-		return
-	}
-
-	categoryMap, err := getCategoryMap(tx, categoryIds)
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
